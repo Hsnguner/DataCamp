@@ -1,0 +1,98 @@
+    # Configured to perform better by manual parameter setting
+from datetime import datetime, timedelta
+import numpy as np
+
+def initialize(context):
+    
+    #: Setting our universe to be between the top 99.5% and the top 100% of stocks by Dollar Volume
+    set_universe(universe.DollarVolumeUniverse(floor_percentile=99.5, ceiling_percentile=100))
+    #: Setting the number of stocks that we want to long and the number of stocks that we want to short
+    context.stocks_to_long = 50
+    context.stocks_to_short = 50
+    
+    schedule_function(func=rebalance,
+                      date_rule=date_rules.every_day(),
+                      time_rule=time_rules.market_open())
+    schedule_function(func=day_counter,
+                      date_rule=date_rules.every_day(),
+                      time_rule=time_rules.market_close())
+    
+    context.rebalance_days = 10
+    context.current_days_counted = 0
+    
+def day_counter(context, data):
+    """
+    Increments our day counter at the end of day, every day
+    """
+    context.current_days_counted += 1
+    
+def rebalance(context, data):
+    """
+    The logic for rebalancing our algorithm
+    """
+    if get_open_orders():
+        return
+    #: A quick check to see that we're only rebalancing every X days, defined by
+    #: context.rebalance_days
+    if context.current_days_counted % context.rebalance_days != 0:
+        return
+    
+    #: Getting 200 days worth of historical data
+    #: If you wanted an intraday strategy based of minutely data you could change '1d' to '1m'
+    historical_data = history(200, '1d', 'price')
+
+    #: Getting the difference between the 50 day mean and the 200 day mean 
+    past_50_day_mean = historical_data.tail(50).mean()
+    past_200_day_mean = historical_data.mean()
+    diff = past_50_day_mean / past_200_day_mean - 1
+
+    #: Cleaning up our diffs by removing any NaNs and sorting it in ascending order
+    diff = diff.dropna()
+    diff.sort()
+
+    #: Recording the stocks that we want to buy and the stocks that we want to sell
+    #: If the 50 mean is greater than the 200 day mean, add it to the buy
+    #: Vice versa for the shorts
+    buys = diff[diff > 0.15]
+    sells = diff[diff < -0.15]
+
+    #: Create weights for our securities
+    buy_length = min(context.stocks_to_long, len(buys))
+    short_length = min(context.stocks_to_short, len(sells))
+    buy_weight = 1.0/buy_length if buy_length != 0 else 0 
+    short_weight = -1.0/short_length if short_length != 0 else 0 
+
+    #: Select securities just above and below the slow moving average (the diff)
+    buys.sort()
+    sells.sort(ascending=False)
+    buys = buys.iloc[:buy_length] if buy_weight != 0 else None
+    sells = sells.iloc[:short_length] if short_weight != 0 else None
+
+    #: Define a 2% stoploss for each security
+    stops =  historical_data.iloc[-1] * 0.05   
+
+    #: Iterate through each security in data
+    for sym in data:
+
+        #: If the security exists in our sells.index then sell
+        if sells is not None and sym in sells.index:
+            log.info('SHORT: %s'%sym.symbol)
+            order_target_percent(sym, short_weight,
+                             stop_price=data[sym].price - stops[sym])
+
+        #: If the security instead, exists in our buys index, buy
+        elif buys is not None and sym in buys.index:
+            log.info('LONG: %s'%sym.symbol)
+            order_target_percent(sym, buy_weight,
+                                 stop_price=data[sym].price + stops[sym])
+
+        #: If the security is in neither list, exit any positions we might have in that security
+        else:
+            order_target(sym, 0)
+
+    record(wlong=buy_weight, wshort=short_weight)
+        
+        
+            
+def handle_data(context, data):
+    pass
