@@ -1,0 +1,189 @@
+# Sample script for a signal based financial trading model
+
+# Retrieve data from Symbols list
+Stocks = lapply(Symbols, function(sym) {
+  periodReturn(na.omit(getSymbols(sym, by=months,from=StartDate, auto.assign=FALSE)))
+})
+head(Stocks)
+do.call(merge, Stocks)
+head(Stocks)
+
+
+# Sharpe Ratios for all stocks
+sharpe <- function(returns, rf = .0085) {
+  (mean(returns) - rf) / sd(returns)
+}
+
+sl <- lapply(Stocks, FUN=sharpe)
+head(sl)
+
+SHARPEStocks <- data.frame(sl)
+colnames(SHARPEStocks) <- Symbols
+head(SHARPEStocks)
+
+                                                                          
+# Correlations for select stocks
+df <- cbind(xxx) # select stock list with cleaned and full data
+tail(df)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
+install.packages("corrplot")
+library(corrplot)
+source("http://www.sthda.com/upload/rquery_cormat.r")
+
+corrvar <- rquery.cormat(df)
+write.table(unlist(corrvar), "corrddata.txt", sep="\t")
+
+                                                   
+# Trading & Signals                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+install.packages("FinancialInstrument")
+install.packages("PerformanceAnalytics")
+install.packages("foreach")
+install.packages("devtools") # if not installed
+require(devtools) 
+install_github("IlyaKipnis/IKTrading") 
+
+library(FinancialInstrument)
+library(PerformanceAnalytics)
+library(foreach)
+
+# next install blotter from GitHub
+devtools::install_github("braverock/blotter")
+# next install quantstrat from GitHub
+devtools::install_github("braverock/quantstrat")
+
+library(blotter)
+library(quantstrat)
+library(IKTrading)
+
+if (!require("IKTrading")){
+  install_github("IlyaKipnis/IKTrading", force=TRUE)
+}
+
+
+# Fill symbols one time for each portfolio
+
+pSymLong <- c(xxx) #select portfolio for long strategy
+
+pSymShort <- c(xxx) #select portfolio for short strategy
+
+pCombined <- c(pSymLong, pSymShort)
+pCombined
+
+# Portfolio initialization
+initdate <- "2008-01-01"
+from <- "2008-01-01"
+to <- "2018-10-31"
+Sys.setenv(TZ="UTC")
+currency("USD")
+stock(pSymShort,currency="USD")
+tradesize <- 100
+initeq <- 100000000
+strategy.st <- "firststrat"
+portfolio.st <- "firststrat"
+account.st <- "firststrat"
+rm.strat(name=strategy.st)
+
+
+# Run for each portfolio, pSymShort, pSymLong
+initPortf(name=portfolio.st, symbols = pSymShort, initDate = initdate, currency = "USD")
+initAcct(account.st, portfolios = portfolio.st, initDate = initdate, currency = "USD", initEq = initeq)
+initOrders(portfolio.st, symbols= pSymShort, initDate = initdate)
+strategy(strategy.st, store = TRUE)
+
+
+# Add indicators to strategy
+add.indicator(strategy = strategy.st,  
+              name = "SMA", 
+              arguments = list(x = quote(na.omit(Cl(mktdata))),n=200),  
+              label = "SMA200")
+
+add.indicator(strategy = strategy.st,  
+              name = "SMA", 
+              arguments = list(x = quote(na.omit(Cl(mktdata))),n=50),
+              label = "SMA50")
+
+
+# Add signals to the strategy
+
+add.signal(strategy.st, name = "sigCrossover",
+           arguments = list(columns = c("SMA50", "SMA200"), relationship = "gte"),
+           label = "longfilter")
+
+add.signal(strategy.st, name = "sigCrossover",
+           arguments = list(columns = c("SMA50", "SMA200"), relationship = "lt"),
+           label = "shortfilter")
+
+test_init <- applyIndicators(strategy.st, mktdata = na.omit(OHLC(mktdata)))
+test <- applySignals(strategy = strategy.st, mktdata = test_init)
+head(test_init)
+tail(test)
+
+
+
+# Create an entry rule of 1 share when all conditions line up to enter into a position
+add.rule(strategy = strategy.st, name = "ruleSignal",
+         arguments = list(sigcol = "longfilter", sigval = TRUE, ordertype = "market", orderqty = tradesize,
+                          orderside = "long", replace = FALSE, prefer = "Open"),
+         type = "enter")
+
+add.rule(strategy = strategy.st, name = "ruleSignal",
+         arguments = list(sigcol = "shortfilter", sigval = TRUE, ordertype = "market", orderqty = -tradesize,
+                          orderside = "short", replace = FALSE, prefer = "Open"),
+         type = "enter")
+
+
+add.rule(strategy.st, name = "ruleSignal",
+         arguments = list(sigcol = "shortfilter", sigval = TRUE, orderqty = "all",
+                          ordertype = "market", orderside = "long",
+                          replace = TRUE, prefer = "Open"),
+         type = "exit")
+
+
+add.rule(strategy.st, name = "ruleSignal",
+         arguments = list(sigcol = "longfilter", sigval = TRUE, orderqty = "all",
+                          ordertype = "market", orderside = "short",
+                          replace = TRUE, prefer = "Open"),
+         type = "exit")
+
+
+# Use applyStrategy() to apply your strategy. Save this to out
+out <- applyStrategy(strategy = strategy.st, portfolios = portfolio.st)
+
+getEndEq(Account=account.st,Date=to)/VXRT$VXRT.Close[2018-11-16]
+
+# Update your portfolio (portfolio.st)
+updatePortf(portfolio.st)
+daterange <- time(getPortfolio(portfolio.st)$summary)[-1]
+
+# Update your account (account.st)
+updateAcct(account.st, daterange)
+updateEndEq(account.st, daterange)
+
+
+# Get the tradeStats for your portfolio, do the same for each portfolio, pSymLong and pSymShort
+tstats <- tradeStats(Portfolios = portfolio.st)
+tail(tstats)
+
+library(rio)
+library(magrittr)
+export(tstats, "pSymShortPerf.xlsx")
+
+sum(tstats$Net.Trading.PL)
+summary(tstats$Net.Trading.PL)
+
+for(symbol in pSymShort) {
+  chart.Posn(portfolio.st, Symbol = symbol, 
+             TA = "add_SMA(n = 50, col = 4); add_SMA(n = 200, col = 2)")
+}
+
+# Other perfomance metrics
+rets <- PortfReturns(Account = account.st)
+rownames(rets) <- pSymShort
+charts.PerformanceSummary(rets, colorset = bluefocus)
+
+
+for(symbol in pSymShort) {
+  pts <- perTradeStats(portfolio.st, Symbol = symbol)
+  kable(pts, booktabs = TRUE, caption = symbol)
+}
+kable(pts)
